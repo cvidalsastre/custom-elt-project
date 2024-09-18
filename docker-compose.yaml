@@ -29,13 +29,26 @@ services:
     build:
       context: ./elt_script # Directory containing the Dockerfile and elt_script.py
       dockerfile: Dockerfile # Name of the Dockerfile, if it's something other than "Dockerfile", specify here
-    command: ['python', 'elt_script.py']
+    command: [ 'python', 'elt_script.py' ]
     networks:
       - elt_network
     depends_on:
       - source_postgres
       - destination_postgres
-
+  dbt:
+    image: ghcr.io/dbt-labs/dbt-postgres:1.4.7
+    command: [ "run", "--profiles-dir", "/root", "--project-dir", "/dbt" ]
+    networks:
+      - elt_network
+    volumes:
+      - ./my_proyect:/dbt
+      - ~/.dbt:/root
+    depends_on:
+      elt_script:
+        condition: service_completed_successfully
+    environment:
+      - DBT_PROFILE:default
+      - DBT_TARGET:dev
 networks:
   elt_network:
     driver: bridge
