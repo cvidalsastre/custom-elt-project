@@ -25,30 +25,108 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: secret
 
-  elt_script:
-    build:
-      context: ./elt_script # Directory containing the Dockerfile and elt_script.py
-      dockerfile: Dockerfile # Name of the Dockerfile, if it's something other than "Dockerfile", specify here
-    command: [ 'python', 'elt_script.py' ]
+  # elt_script:
+  #   build:
+  #     context: ./elt_script # Directory containing the Dockerfile and elt_script.py
+  #     dockerfile: Dockerfile # Name of the Dockerfile, if it's something other than "Dockerfile", specify here
+  #   command: [ 'python', 'elt_script.py' ]
+  #   networks:
+  #     - elt_network
+  #   depends_on:
+  #     - source_postgres
+  #     - destination_postgres
+  # dbt:
+  #   image: ghcr.io/dbt-labs/dbt-postgres:1.4.7
+  #   command: [ "run", "--profiles-dir", "/root", "--project-dir", "/dbt" ]
+  #   networks:
+  #     - elt_network
+  #   volumes:
+  #     - ./my_proyect:/dbt
+  #     - ~/.dbt:/root
+  #   depends_on:
+  #     elt_script:
+  #       condition: service_completed_successfully
+  #   environment:
+  #     - DBT_PROFILE:default
+  #     - DBT_TARGET:dev
+  postgres:
+    image: postgres:latest
     networks:
       - elt_network
-    depends_on:
-      - source_postgres
-      - destination_postgres
-  dbt:
-    image: ghcr.io/dbt-labs/dbt-postgres:1.4.7
-    command: [ "run", "--profiles-dir", "/root", "--project-dir", "/dbt" ]
-    networks:
-      - elt_network
-    volumes:
-      - ./my_proyect:/dbt
-      - ~/.dbt:/root
-    depends_on:
-      elt_script:
-        condition: service_completed_successfully
     environment:
-      - DBT_PROFILE:default
-      - DBT_TARGET:dev
+      - POSTGRES_USER=airflow
+      - POSTGRES_PASSWORD=airflow
+      - POSTGRES_DB=airflow
+  init-airflow:
+    image: apache/airflow:latest
+    depends_on:
+      - postgres
+    networks:
+      - elt_network
+    environment:
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgres+psycopg2://airflow:airflow@postgres/airflow
+    command: >
+      bash -c "airflow db init && airflow users create --username airflow --password airflow --firstname John --lastname Doe --role Admin --email galporrin@gmail.com"
+  webserver:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    user: 'root'
+    depends_on:
+      - postgres
+    networks:
+      - elt_network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./elt:/opt/airflow/elt
+      - ./custom_postgres:/opt/dbt
+      - .~.dbt:/root/.dbt
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - LOAD_EX=n
+      - EXECUTOR=Local
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgres+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CORE_FERNET_KEY=DGB643sR0HdPRE4TWNCCWhhPgJk1Bcm1JvDN-YLgewg=
+      - AIRFLOW__WEBSERVER__DEFAULT__USER_USERNAME=airflow
+      - AIRFLOW__WEBSERVER__DEFAULT__USER_PASSWORD=airflow
+      - AIRFLOW__WW_USER_USERNAME=airflow
+      - AIRFLOW__WW_USER_PASSWORD=airflow
+      - AIRFLOW__WEBSERVER__SECRET_KEY=secret
+    ports:
+      - "8085:8080"
+    command: webserver
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    user: 'root'
+    depends_on:
+      - postgres
+    networks:
+      - elt_network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./elt:/opt/airflow/elt
+      - ./custom_postgres:/opt/dbt
+      - .~.dbt:/root/.dbt
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - LOAD_EX=n
+      - EXECUTOR=Local
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgres+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CORE_FERNET_KEY=DGB643sR0HdPRE4TWNCCWhhPgJk1Bcm1JvDN-YLgewg=
+      - AIRFLOW__WEBSERVER__DEFAULT__USER_USERNAME=airflow
+      - AIRFLOW__WEBSERVER__DEFAULT__USER_PASSWORD=airflow
+      - AIRFLOW__WW_USER_USERNAME=airflow
+      - AIRFLOW__WW_USER_PASSWORD=airflow
+      - AIRFLOW__WEBSERVER__SECRET_KEY=secret
+    ports:
+      - "8084:8080"
+    command: scheduler
 networks:
   elt_network:
     driver: bridge
